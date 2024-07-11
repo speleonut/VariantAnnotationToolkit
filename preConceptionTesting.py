@@ -21,6 +21,7 @@ def usage():
 # Script created by Mark Corbett on 20/12/2019
 # Contact: mark.corbett at adelaide.edu dot au
 # Edit History (Name; Date; Description)
+# Mark Corbett; 06/12/2023; Add in pahsed genotypes and update ANNOVAR field names
 #
 '''
          )
@@ -28,12 +29,14 @@ def usage():
 # Set initial values
 inputFile = ''
 sampleFile = ''
-notGeneTerms = ['downstream', 'intergenic', 'intronic', 'ncRNA_exonic', 'ncRNA_intronic', 'ncRNA_splicing', 'ncRNA_UTR3', 'ncRNA_UTR5', 'upstream', 'UTR3', 'UTR5', 'upstream;downstream']
+geneTerms = ['exonic', 'splicing', 'UTR5', 'ncRNA_exonic', 'ncRNA_splicing']
+notGeneTerms = ['downstream', 'intergenic', 'intronic', 'ncRNA_exonic', 'ncRNA_intronic', 'ncRNA_splicing', 'ncRNA_UTR3', 'ncRNA_UTR5', 'upstream', 'UTR3', 'UTR5']
 filterTerms = ['.', 'PASS']
 ncSpliceTerms = ['splicing', 'intronic']
-filter005 = ['esp6500siv2_all', '1000g2015aug_all', 'UK10K-AF-all']
-filter0001 = ['ExAC.r0.1.filtered', 'exac03', 'gnomad211_exome', 'gnomad211_genome']
-nullAlelles = ['0/0', '\./\.']
+filter005 = ['esp6500siv2_all', '1000g2015aug_all']
+filter0001 = ['exac03', 'gnomad211_exome', 'gnomad211_genome', 'AF']
+pathogenicFilter = ['Pathogenic', 'Likely_pathogenic']
+nullAlelles = ['0/0', '0|0'. '\./\.']
 # Read command line arguments
 try:
     opts, args = getopt.getopt(sys.argv[1:],'hi:m:f:',['help'])
@@ -75,7 +78,7 @@ with open(inputFile) as f:
 ANNOVARtable=pd.read_csv(inputFile, sep='\t', index_col = num_cols)
 samples = [mumID, dadID]
 
-hetList=ANNOVARtable[ANNOVARtable[samples[0]].str.match('0/1') & ANNOVARtable[samples[1]].str.match('0/1')]
+hetList=ANNOVARtable[ANNOVARtable[samples[0]].str.match(pat = '(0/1)|(0\|1)|(1\|0)') & ANNOVARtable[samples[1]].str.match(pat = '(0/1)|(0\|1)|(1\|0)')]
 hetList.to_csv("allSharedHetCalls."+inputFile, sep='\t')
 
 #Generic filters for most likely pathogenic
@@ -83,26 +86,30 @@ hetList=bestGeneCandidatesFilter(df=hetList)
 hetList.to_csv("allSharedHetCalls.BestGeneCandidates."+inputFile, sep='\t')
 
 # Compound het calls
-mNotfHets=ANNOVARtable[ANNOVARtable[samples[0]].str.match('0/1') & ANNOVARtable[samples[1]].str.contains('|'.join(nullAlelles))]
-mGenes=pd.unique(mNotfHets['Gene.gene'])
-fNotmHets=ANNOVARtable[ANNOVARtable[samples[0]].str.contains('|'.join(nullAlelles)) & ANNOVARtable[samples[1]].str.match('0/1')]
-fGenes=pd.unique(fNotmHets['Gene.gene'])
+mNotfHets=ANNOVARtable[ANNOVARtable[samples[0]].str.match(pat = '(0/1)|(0\|1)|(1\|0)') & ANNOVARtable[samples[1]].str.contains('|'.join(nullAlelles))]
+mGenes=pd.unique(mNotfHets['Gene.refGene'])
+fNotmHets=ANNOVARtable[ANNOVARtable[samples[0]].str.contains('|'.join(nullAlelles)) & ANNOVARtable[samples[1]].str.match(pat = '(0/1)|(0\|1)|(1\|0)')]
+fGenes=pd.unique(fNotmHets['Gene.refGene'])
 seriesCHgenes=pd.Series(mGenes.tolist() + fGenes.tolist())
 chGenes=seriesCHgenes[seriesCHgenes.duplicated()]
 compHets=pd.concat([mNotfHets, fNotmHets], axis=0, join='outer')
-compHets=compHets[compHets['Gene.gene'].isin(chGenes)] # All possible compHets
+compHets=compHets[compHets['Gene.refGene'].isin(chGenes)] # All possible compHets
 # Independently apply filters to mum and dad lists then filter the CH list
 filtmNotfHets=bestGeneCandidatesFilter(df=mNotfHets)
 filtfNotmHets=bestGeneCandidatesFilter(df=fNotmHets)
-mGenes=pd.unique(filtmNotfHets['Gene.gene'])
-fGenes=pd.unique(filtfNotmHets['Gene.gene'])
+mGenes=pd.unique(filtmNotfHets['Gene.refGene'])
+fGenes=pd.unique(filtfNotmHets['Gene.refGene'])
 seriesCHgenes=pd.Series(mGenes.tolist() + fGenes.tolist())
 chGenes=seriesCHgenes[seriesCHgenes.duplicated()]
-compHets=compHets[compHets['Gene.gene'].isin(chGenes)]
+compHets=compHets[compHets['Gene.refGene'].isin(chGenes)]
 compHets=bestGeneCandidatesFilter(df=compHets)
-compHets=compHets[compHets['Gene.gene'].duplicated(keep=False)]  # Re-run the gene filter after the other filters
+compHets=compHets[compHets['Gene.refGene'].duplicated(keep=False)]  # Re-run the gene filter after the other filters
 compHets.to_csv("allcompHetCalls.BestGeneCandidates."+inputFile, sep='\t')
 
 # X-linked
 xList=filtmNotfHets[filtmNotfHets['chr'].str.contains("X", na=False)]
 xList.to_csv("allX-linked.BestGeneCandidates."+inputFile, sep='\t')
+
+# ClinVar
+cvList=ANNOVARtable[~ANNOVARtable[samples[0,1]].str.contains('|'.join(nullAlelles)) & ANNOVARtable['CLNSIG'].str.contains('|'.join(pathogenicFilter))]
+cvList.to_csv("clinVar."+inputFile, sep='\t')
